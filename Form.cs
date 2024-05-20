@@ -39,7 +39,7 @@ namespace RTG_Updater
 			if (Path.GetExtension(droppedFile).ToLowerInvariant() == ".exe")
 			{
 				string hash = CalculateSHA256Hash(droppedFile);
-				string hashFileName = Path.GetFileNameWithoutExtension(droppedFile) + "_hash.txt";
+				string hashFileName = "hash.txt";
 				string hashFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, hashFileName);
 
 				File.WriteAllText(hashFilePath, hash); // Use the synchronous method
@@ -126,62 +126,133 @@ namespace RTG_Updater
             }
         }
 
-        private async void updateButton_Click(object sender, EventArgs e)
-        {
-            string zipUrl = "https://gaurdia.page/update.zip";
-            string zipPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "update.zip");
-            string extractPath = AppDomain.CurrentDomain.BaseDirectory;
+		private async void updateButton_Click(object sender, EventArgs e)
+		{
+			string zipUrl = "https://gaurdia.page/update.zip";
+			string zipPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "update.zip");
+			string oldGameFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "RTGaurdia");
+			string tempGameFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"RTGaurdia_{Guid.NewGuid()}");
 
-            try
-            {
-                // Disable buttons during update
-                updateButton.Enabled = false;
-                launchButton.Enabled = false;
+			try
+			{
+				// Disable buttons during update
+				updateButton.Enabled = false;
+				launchButton.Enabled = false;
 
-                // Download the ZIP file with progress
-                statusLabel.Text = "Downloading update...";
-                await DownloadFileWithProgress(zipUrl, zipPath);
+				// Download the ZIP file with progress
+				statusLabel.Text = "Downloading update...";
+				await DownloadFileWithProgress(zipUrl, zipPath);
 
-                // Extract the ZIP file
-                statusLabel.Text = "Extracting update...";
-                ZipFile.ExtractToDirectory(zipPath, extractPath); // Overwrite existing files
+				// Rename existing RTGaurdia folder
+				if (Directory.Exists(oldGameFolder))
+				{
+					Directory.Move(oldGameFolder, tempGameFolder); // Temporary rename
+				}
 
-                // Delete the downloaded ZIP file
-                File.Delete(zipPath);
+				// Extract directly to the root folder
+				statusLabel.Text = "Extracting update...";
+				using (var client = new HttpClient())
+				{
+					var response = await client.GetAsync(zipUrl);
+					response.EnsureSuccessStatusCode(); // Check for successful download
 
-                // Verify the extracted file's hash
-                string extractedExecutablePath = Path.Combine(extractPath, "RTGaurdia", "RTGaurdia.exe");
-                if (File.Exists(extractedExecutablePath)) // Check if the file exists
-                {
-                    string downloadedHash = CalculateSHA256Hash(extractedExecutablePath);
+					using (var zipStream = await response.Content.ReadAsStreamAsync())
+					using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Read))
+					{
+						foreach (ZipArchiveEntry entry in archive.Entries)
+						{
+							if (entry.Length > 0) // Skip empty directories
+							{
+								// Directly extract to the root folder
+								string destinationPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, entry.FullName);
 
-                    if (downloadedHash == this.expectedHash) // Compare with the class-level field
-                    {
-                        statusLabel.Text = "Update complete! Ready to launch.";
-                        updateButton.Enabled = false;
-                        launchButton.Enabled = true;
-                    }
-                    else
-                    {
-                        statusLabel.Text = $"Error: Downloaded file hash ({downloadedHash}) doesn't match expected hash ({this.expectedHash}). Please try again.";
-                        updateButton.Enabled = true; // Re-enable update button in case of a mismatch
-                    }
-                }
-                else
-                {
-                    statusLabel.Text = "Error: Extracted file not found.";
-                    updateButton.Enabled = true;
-                }
-            }
-            catch (Exception ex)
-            {
-                statusLabel.Text = "Error updating: " + ex.Message;
-                updateButton.Enabled = true; // Re-enable in case of error
-            }
-        }
+								// Create directory if it doesn't exist
+								Directory.CreateDirectory(Path.GetDirectoryName(destinationPath));
 
+								try
+								{
+									entry.ExtractToFile(destinationPath, true);
+								}
+								catch (Exception extractionEx)
+								{
+									File.AppendAllText("error_log.txt", $"Error extracting file {entry.FullName}: {extractionEx.Message}\n{extractionEx.StackTrace}\n");
+									// Consider rethrowing the exception or handling the error differently
+								}
+							}
+						}
+					}
+				}
 
-        private async Task DownloadFileWithProgress(string url, string destinationPath)
+				// Delete the downloaded ZIP file
+				File.Delete(zipPath);
+
+				// Verify the extracted file's hash
+				string extractedExecutablePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "RTGaurdia", "RTGaurdia.exe");
+				if (File.Exists(extractedExecutablePath))
+				{
+					string downloadedHash = CalculateSHA256Hash(extractedExecutablePath);
+
+					if (downloadedHash == this.expectedHash) // Compare with the class-level field
+					{
+						// Delete the temporary (renamed) folder
+						if (Directory.Exists(tempGameFolder))
+						{
+							Directory.Delete(tempGameFolder, true);
+						}
+
+						statusLabel.Text = "Update complete! Ready to launch.";
+						updateButton.Enabled = false;
+						launchButton.Enabled = true;
+					}
+					else
+					{
+						statusLabel.Text = $"Error: Downloaded file hash ({downloadedHash}) doesn't match expected hash ({this.expectedHash}). Please try again.";
+						updateButton.Enabled = true; // Re-enable update button in case of a mismatch
+					}
+				}
+				else
+				{
+					statusLabel.Text = "Error: Extracted file not found.";
+					updateButton.Enabled = true;
+				}
+			}
+			catch (Exception ex)
+			{
+				// Revert renaming if an error occurs
+				if (Directory.Exists(tempGameFolder))
+				{
+					Directory.Move(tempGameFolder, oldGameFolder); // Move it back
+				}
+
+				File.AppendAllText("error_log.txt", $"Error updating: {ex.Message}\n{ex.StackTrace}\n");
+				statusLabel.Text = "Error updating: Check error_log.txt for details";
+				updateButton.Enabled = true;
+			}
+		}
+
+		private bool IsFileLocked(string filePath)
+		{
+			try
+			{
+				using (FileStream stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.None))
+				{
+					stream.Close();
+				}
+			}
+			catch (IOException)
+			{
+				// The file is unavailable because it is:
+				// - being written to
+				// - or being processed by another thread
+				// - or does not exist (has already been processed)
+				return true;
+			}
+
+			//file is not locked
+			return false;
+		}
+
+		private async Task DownloadFileWithProgress(string url, string destinationPath)
         {
             using (HttpClient client = new HttpClient())
             {
