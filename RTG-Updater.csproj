@@ -239,6 +239,8 @@
     <None Include="App.config" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Resources\bg.png" />
+    <None Include="bin\Release\image.png" />
     <Content Include="crossedSwords.ico" />
     <Content Include="FodyWeavers.xml" />
   </ItemGroup>

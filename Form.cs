@@ -1,26 +1,56 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement;
-using System.Linq;
 
 namespace RTG_Updater
 {
     public partial class Form : System.Windows.Forms.Form
     {
         private string expectedHash = ""; // Declare expectedHash as a class-level field
+		public const int WM_NCLBUTTONDOWN = 0xA1;
+		public const int HT_CAPTION = 0x2;
 
+		[DllImportAttribute("user32.dll")]
+		public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+
+		[DllImportAttribute("user32.dll")]
+		public static extern bool ReleaseCapture();
+
+		// Event handler for MouseDown on the form
+		private void Form_MouseDown(object sender, MouseEventArgs e)
+		{
+			if (e.Button == MouseButtons.Left)
+			{
+				ReleaseCapture();
+				SendMessage(Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0);
+			}
+		}
 		public Form()
 		{
 			InitializeComponent();
 			this.AllowDrop = true; // Enable drag-and-drop on the form
 			this.DragEnter += new DragEventHandler(Form_DragEnter);
 			this.DragDrop += new DragEventHandler(Form_DragDrop);
+
+			// 
+			FormBorderStyle = FormBorderStyle.None;
+			DoubleBuffered = true;
+
+
+			updateButton.BringToFront();
+			launchButton.BringToFront();
+			statusLabel.BringToFront();
+			progressBar.BringToFront();
+
+			this.MouseDown += new MouseEventHandler(Form_MouseDown);
+
 		}
 
 		private void Form_DragEnter(object sender, DragEventArgs e)
@@ -311,7 +341,15 @@ namespace RTG_Updater
             // Placeholder for any specific action when the status label is clicked
         }
 
+		private void closeButton_Click(object sender, EventArgs e)
+		{
+			this.Close();
 
+		}
 
-    }
+		private void title_Click(object sender, EventArgs e)
+		{
+
+		}
+	}
 }
